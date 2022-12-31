@@ -292,7 +292,7 @@ INSERT INTO comenzi VALUES(SEQ_COMENZI.NEXTVAL, 2, 6, 'Str. Aviatorului, Nr.4', 
 INSERT INTO comenzi VALUES(SEQ_COMENZI.NEXTVAL, null, 7, null, TO_TIMESTAMP('2022-02-09 07:00:00', 'YYYY-MM-DD HH24:MI:SS'));
 INSERT INTO comenzi VALUES(SEQ_COMENZI.NEXTVAL, null, 7, null, TO_TIMESTAMP('2022-02-09 07:00:00', 'YYYY-MM-DD HH24:MI:SS'));
 INSERT INTO comenzi VALUES(SEQ_COMENZI.NEXTVAL, null, 7, null, TO_TIMESTAMP('2022-02-09 07:00:00', 'YYYY-MM-DD HH24:MI:SS'));
-INSERT INTO comenzi VALUES(SEQ_COMENZI.NEXTVAL, 5, 6, 'Str. Victoriei, Nr. 56' TO_TIMESTAMP('2022-02-09 07:00:00', 'YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO comenzi VALUES(SEQ_COMENZI.NEXTVAL, 5, 6, 'Str. Victoriei, Nr. 56', TO_TIMESTAMP('2022-02-09 07:00:00', 'YYYY-MM-DD HH24:MI:SS'));
 INSERT INTO comenzi VALUES(SEQ_COMENZI.NEXTVAL, 4, 6, 'Blvd. George Enescu, Nr. 11A', TO_TIMESTAMP('2022-02-09 07:00:00', 'YYYY-MM-DD HH24:MI:SS'));
 
 select * from comenzi;
@@ -372,6 +372,8 @@ BEGIN
     END LOOP;
 END ex_6;
 
+/
+
 BEGIN
     ex_6();
 END;
@@ -418,6 +420,8 @@ BEGIN
         g_index := g_index + 1;
     END LOOP;
 END ex_7;
+
+/
 
 DECLARE
     v_nume clienti.nume%TYPE := 'Maru';
@@ -475,6 +479,7 @@ BEGIN
             RAISE_APPLICATION_ERROR(-20004, 'Nu exista nici un produs in comanda data');
 END ex_8;
 
+/
 
 DECLARE
     v_nume clienti.nume%TYPE := 'Maru';
@@ -499,3 +504,91 @@ DECLARE
 BEGIN
     DBMS_OUTPUT.PUT_LINE(ex_8(v_nume, v_prenume, v_data));
 END;
+
+
+-- 10
+CREATE OR REPLACE TRIGGER ex_10
+    BEFORE INSERT OR UPDATE OR DELETE ON comenzi
+BEGIN
+    IF          ((TO_CHAR(SYSDATE, 'DAY') = 'SATURDAY' OR TO_CHAR(SYSDATE, 'DAY') = 'SUNDAY') 
+            AND 
+                (TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) > 23 OR TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) < 9)) 
+        OR 
+                ((TO_CHAR(SYSDATE, 'DAY') != 'SATURDAY' AND TO_CHAR(SYSDATE, 'DAY') != 'SUNDAY') 
+            AND 
+                (TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) > 23 OR TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) < 8)) 
+    THEN
+        RAISE_APPLICATION_ERROR(-20020, 'Restaurantul este inchis');
+    END IF;
+END ex_10;
+
+/
+
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Zi: ' || TO_CHAR(SYSDATE, 'DAY') || ', ora: ' || TO_CHAR(SYSDATE, 'HH24:MI'));
+    INSERT INTO comenzi VALUES(SEQ_COMENZI.NEXTVAL, 4, 7, null, TO_TIMESTAMP('2022-02-09 08:00:00', 'YYYY-MM-DD HH24:MI:SS'));
+END;
+
+
+
+-- 11
+CREATE OR REPLACE TRIGGER ex_11
+    BEFORE INSERT OR UPDATE
+    ON produse_comanda
+    FOR EACH ROW
+DECLARE
+    v_nume_produs produse.nume%TYPE;
+    CURSOR ingredients (id_prod produse.id_produs%TYPE)
+    IS 
+        SELECT * FROM contine c
+        JOIN ingrediente i ON c.id_ingredient = i.id_ingredient
+        WHERE id_produs = id_prod;
+BEGIN
+    SELECT nume INTO v_nume_produs FROM produse WHERE id_produs = :NEW.id_produs;
+    FOR i IN ingredients(:NEW.id_produs) LOOP
+        IF :NEW.cantitate * i.cantitate > i.stoc THEN
+            RAISE_APPLICATION_ERROR(-20030, 'Nu exista suficient stoc de ' || i.nume || ' pentru a produce produsul ' || v_nume_produs);
+        ELSIF i.stoc - :NEW.cantitate * i.cantitate < i.stoc_necesar THEN
+            DBMS_OUTPUT.PUT_LINE('Nu mai este mentinut stocul necesar la ingredientul ' || i.nume);
+        END IF;
+    END LOOP;
+END ex_11;
+
+/
+
+BEGIN
+    -- inserare la care suntem avertizati despre ingredientul mozzarella ca nu are stoc necesar, insa sunca are stoc necesar
+    INSERT INTO produse_comanda VALUES (2, 8, 2, 1);
+    -- inserare la care suntem avertizati ca nu mai este mentinut stocul necesar nici la sunca nici la mozzarella
+--    INSERT INTO produse_comanda VALUES (2, 8, 2, 12);
+--    -- inserare care nu este permisa
+--    INSERT INTO produse_comanda VALUES (2, 8, 2, 50);
+END;
+
+
+-- 12
+CREATE OR REPLACE TRIGGER ex_12
+    BEFORE CREATE OR DROP OR ALTER ON SCHEMA
+BEGIN
+    IF USER != 'ADMIN' THEN
+        RAISE_APPLICATION_ERROR(-20040, 'Doar utilizatorul admin poate modifica schema bazei de date');
+    ELSIF TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) < 23 THEN
+        RAISE_APPLICATION_ERROR(-20041, 'Doar in afara programului de functionare a restaurantului puteti efectua modificari asupra schemei bazei de date');
+    END IF;
+    IF TO_CHAR(SYSDATE, 'DAY') = 'SUNDAY' OR TO_CHAR(SYSDATE, 'DAY') = 'SATURDAY' THEN
+        IF TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) > 9 THEN
+            RAISE_APPLICATION_ERROR(-20041, 'Doar in afara programului de functionare a restaurantului puteti efectua modificari asupra schemei bazei de date');
+        END IF;
+    ELSE
+        IF TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) > 8 THEN
+            RAISE_APPLICATION_ERROR(-20041, 'Doar in afara programului de functionare a restaurantului puteti efectua modificari asupra schemei bazei de date');
+        END IF;
+    END IF;
+END ex_12;
+
+/
+
+CREATE TABLE example (ex NUMBER(2));
+
+
+-- 13
