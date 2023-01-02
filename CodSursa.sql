@@ -502,7 +502,50 @@ DECLARE
 --    v_prenume clienti.prenume%TYPE := 'Denisa';
 --    v_data comenzi.data_primire%TYPE := '09-FEB-22 07.00.00.000000000 AM';
 BEGIN
-    DBMS_OUTPUT.PUT_LINE(ex_8(v_nume, v_prenume, v_data));
+    DBMS_OUTPUT.PUT_LINE('Valoarea comenzii este de ' || ex_8(v_nume, v_prenume, v_data) || 'RON');
+END;
+
+-- 9
+CREATE OR REPLACE PROCEDURE ex_9
+IS
+    v_id_produs produse.id_produs%TYPE;
+    v_nr_ingrediente NUMBER(3);
+    v_check BOOLEAN := false;
+    v_nume_produs produse.nume%TYPE;
+    CURSOR v_cursor(c_id_produs produse.id_produs%TYPE)
+    IS
+        SELECT clienti.nume clienti_nume, clienti.prenume clienti_prenume, angajati.nume angajati_nume, angajati.prenume angajati_prenume, nr_inmatriculare, data_primire
+        FROM produse_comanda
+        JOIN comenzi ON comenzi.id_comanda = produse_comanda.id_comanda
+        JOIN clienti ON clienti.id_client = comenzi.id_client
+        JOIN angajati ON angajati.id_angajat = produse_comanda.id_angajat
+        JOIN masini_livrare ON masini_livrare.serie_sasiu = angajati.serie_sasiu
+        WHERE produse_comanda.id_produs = c_id_produs;
+BEGIN
+    SELECT MAX(COUNT(*)) INTO v_nr_ingrediente FROM contine GROUP BY id_produs;
+    SELECT id_produs INTO v_id_produs FROM (SELECT id_produs, COUNT(*) as nr FROM contine GROUP BY id_produs) c WHERE nr = v_nr_ingrediente;
+    SELECT nume INTO v_nume_produs FROM produse WHERE id_produs = v_id_produs;
+    FOR i IN v_cursor(v_id_produs) LOOP
+        v_check := true;
+        DBMS_OUTPUT.PUT_LINE('Clientul ' || i.clienti_nume || ' ' || i.clienti_prenume || ' a comandat produsul ' || v_nume_produs || ' pe ' || TO_CHAR(i.data_primire, 'YYYY-MM-DD HH24:MI:SS') || ' si a fost livrata de ' || i.angajati_nume || ' ' || i.angajati_prenume || ' cu masina ' || i.nr_inmatriculare);
+    END LOOP;
+    IF v_check = false THEN
+        DBMS_OUTPUT.PUT_LINE('Nu a comandat inca nimeni produsul ' || v_nume_produs);
+    END IF;
+    EXCEPTION
+        WHEN too_many_rows THEN
+            RAISE_APPLICATION_ERROR(-20060, 'Exista mai multe produse ce au numar maxim de ingrediente');
+        WHEN no_data_found THEN
+            RAISE_APPLICATION_ERROR(-20061, 'Nu exista nici un produs');
+        WHEN others THEN
+            RAISE_APPLICATION_ERROR(-20062, 'A aparut alta eroare');
+END ex_9;
+
+INSERT INTO produse_comanda VALUES(3, 1, 6, 1); -- am adaugat produsul Paste Carbonara la comanda 1.
+INSERT INTO contine VALUES(5, 5, 0.07); -- am adaugat ingredientul mozzarella la produsul Crispy Strips pentru a avea si acesta 3 ingrediente 
+
+BEGIN
+    ex_9;
 END;
 
 
@@ -512,11 +555,11 @@ CREATE OR REPLACE TRIGGER ex_10
 BEGIN
     IF          ((TO_CHAR(SYSDATE, 'DAY') = 'SATURDAY' OR TO_CHAR(SYSDATE, 'DAY') = 'SUNDAY') 
             AND 
-                (TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) > 23 OR TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) < 9)) 
+                (TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) >= 23 OR TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) < 9)) 
         OR 
                 ((TO_CHAR(SYSDATE, 'DAY') != 'SATURDAY' AND TO_CHAR(SYSDATE, 'DAY') != 'SUNDAY') 
             AND 
-                (TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) > 23 OR TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) < 8)) 
+                (TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) >= 23 OR TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) < 8)) 
     THEN
         RAISE_APPLICATION_ERROR(-20020, 'Restaurantul este inchis');
     END IF;
@@ -570,21 +613,21 @@ END;
 CREATE OR REPLACE TRIGGER ex_12
     BEFORE CREATE OR DROP OR ALTER ON SCHEMA
 BEGIN
-    IF USER != 'ADMIN' THEN
-        RAISE_APPLICATION_ERROR(-20040, 'Doar utilizatorul admin poate modifica schema bazei de date');
-    ELSIF TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) < 23 THEN
-        RAISE_APPLICATION_ERROR(-20041, 'Doar in afara programului de functionare a restaurantului puteti efectua modificari asupra schemei bazei de date');
+    IF USER != 'ADMINISTRATOR' THEN
+        RAISE_APPLICATION_ERROR(-20040, 'Doar administratorul poate modifica schema bazei de date');
     END IF;
     IF TO_CHAR(SYSDATE, 'DAY') = 'SUNDAY' OR TO_CHAR(SYSDATE, 'DAY') = 'SATURDAY' THEN
-        IF TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) > 9 THEN
+        IF TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) < 23 AND TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) >= 9 THEN
             RAISE_APPLICATION_ERROR(-20041, 'Doar in afara programului de functionare a restaurantului puteti efectua modificari asupra schemei bazei de date');
         END IF;
     ELSE
-        IF TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) > 8 THEN
+        IF TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) < 23 AND TO_NUMBER(TO_CHAR(SYSDATE, 'HH24')) >= 8 THEN
             RAISE_APPLICATION_ERROR(-20041, 'Doar in afara programului de functionare a restaurantului puteti efectua modificari asupra schemei bazei de date');
         END IF;
     END IF;
 END ex_12;
+
+
 
 /
 
@@ -592,3 +635,199 @@ CREATE TABLE example (ex NUMBER(2));
 
 
 -- 13
+CREATE OR REPLACE PACKAGE pachet_ex_13 AS
+    PROCEDURE ex_6;
+    PROCEDURE ex_7
+        (p_nume clienti.nume%TYPE,
+        p_prenume clienti.prenume%TYPE);
+    FUNCTION ex_8 (f_nume clienti.nume%TYPE,
+        f_prenume clienti.prenume%TYPE,
+        f_data comenzi.data_primire%TYPE)
+    RETURN NUMBER;
+    PROCEDURE ex_9;
+END pachet_ex_13;
+
+CREATE OR REPLACE PACKAGE BODY pachet_ex_13 AS
+    PROCEDURE ex_6
+    IS
+        TYPE produs IS RECORD (id_produs produse.id_produs%TYPE, nume produse.nume%TYPE);
+        TYPE vec_categorii IS TABLE OF categorii%ROWTYPE INDEX BY PLS_INTEGER;
+        TYPE vec_produse IS TABLE OF produs;
+        TYPE vec_contine IS VARRAY(20) OF (ingrediente.id_ingredient%TYPE);
+        v_produse vec_produse := vec_produse();
+        v_categorii vec_categorii;
+        v_contine vec_contine := vec_contine();
+        j INTEGER;
+        v_nume ingrediente.nume%TYPE;
+        a NUMBER(4);
+    BEGIN
+        SELECT * BULK COLLECT INTO v_categorii FROM categorii;
+        FOR i IN v_categorii.FIRST..v_categorii.LAST LOOP
+            SELECT id_produs, nume BULK COLLECT INTO v_produse FROM produse WHERE id_categorie = v_categorii(i).id_categorie;
+            DBMS_OUTPUT.PUT_LINE('Categoria ' || v_categorii(i).nume);
+            j := v_produse.FIRST;
+            WHILE j <= v_produse.LAST LOOP
+                DBMS_OUTPUT.PUT(v_produse(j).nume || ' : ');
+                SELECT COUNT(*) INTO a FROM contine WHERE id_produs = v_produse(j).id_produs;
+                IF a > 0 THEN
+                    a := a - 1;
+                    SELECT id_ingredient BULK COLLECT INTO v_contine FROM contine WHERE v_produse(j).id_produs = id_produs;   
+                    FOR k in v_contine.FIRST..v_contine.LAST LOOP
+                        SELECT nume INTO v_nume FROM ingrediente WHERE id_ingredient = v_contine(k);
+                        DBMS_OUTPUT.PUT(v_nume);
+                        IF a > 0 THEN
+                            DBMS_OUTPUT.PUT(', ');
+                            a := a - 1;
+                        END IF;
+                    END LOOP;
+                ELSE
+                    DBMS_OUTPUT.PUT('Nu exista inca ingrediente introduse pentru acest produs');
+                END IF;
+                j := v_produse.NEXT(j);
+                DBMS_OUTPUT.NEW_LINE;
+            END LOOP;
+            DBMS_OUTPUT.NEW_LINE;
+        END LOOP;
+    END ex_6;
+    
+    PROCEDURE ex_7
+        (p_nume clienti.nume%TYPE,
+         p_prenume clienti.prenume%TYPE)
+    IS
+        g_id_comanda comenzi.id_comanda%TYPE;
+        g_data_primire comenzi.data_primire%TYPE;
+        g_nume_produs produse.nume%TYPE;
+        g_index NUMBER(4) := 1;
+        g_comma BOOLEAN;
+        CURSOR c_comenzi_client
+        IS
+            SELECT id_comanda, data_primire FROM comenzi WHERE id_client = (SELECT id_client
+                                                                            FROM clienti
+                                                                            WHERE nume = p_nume AND prenume = p_prenume);
+        CURSOR c_produse_comanda (v_id_comanda comenzi.id_comanda%TYPE)
+        IS
+            SELECT id_produs FROM produse_comanda WHERE id_comanda = v_id_comanda;
+    BEGIN
+        DBMS_OUTPUT.PUT_LINE('Clientul cu numele ' || p_nume || ' ' || p_prenume || ' a dat comenzile:');
+        --cursor clasic
+        OPEN c_comenzi_client;
+        LOOP
+            FETCH c_comenzi_client INTO g_id_comanda, g_data_primire;
+            EXIT WHEN c_comenzi_client%NOTFOUND;
+            DBMS_OUTPUT.PUT(g_index || '. Comanda de la data de ' || TO_CHAR(g_data_primire, 'YYYY-MM-DD HH24:MI:SS') || ' contine: ');
+            g_comma := true;
+            --ciclu cursor cu parametru
+            FOR i IN c_produse_comanda(g_id_comanda) LOOP
+                SELECT nume INTO g_nume_produs FROM produse WHERE id_produs = i.id_produs;
+                IF g_comma THEN
+                    DBMS_OUTPUT.PUT(g_nume_produs);
+                    g_comma := false;
+                ELSE
+                    DBMS_OUTPUT.PUT(', ' || g_nume_produs);
+                END IF;
+            END LOOP;
+            DBMS_OUTPUT.NEW_LINE;
+            g_index := g_index + 1;
+        END LOOP;
+    END ex_7;
+    
+    FUNCTION ex_8 (f_nume clienti.nume%TYPE,
+                                     f_prenume clienti.prenume%TYPE,
+                                     f_data comenzi.data_primire%TYPE)
+                                     RETURN NUMBER
+    IS
+        TYPE price_table_datatype IS TABLE OF NUMBER(8, 2) INDEX BY PLS_INTEGER;
+        price_table price_table_datatype;
+        pret_total NUMBER(8,2) := 0;
+        nr NUMBER(4);
+        v_id_client clienti.id_client%TYPE;
+        zero_clients_exc EXCEPTION;
+        multiple_clients_exc EXCEPTION;
+        zero_orders_exc EXCEPTION;
+    BEGIN
+        SELECT COUNT(*) INTO nr FROM clienti WHERE nume = f_nume AND prenume = f_prenume;
+        IF nr = 0 THEN
+            RAISE zero_clients_exc;
+        ELSIF nr > 1 THEN
+            RAISE multiple_clients_exc;
+        END IF;
+        SELECT id_client INTO v_id_client FROM clienti WHERE UPPER(nume) = UPPER(f_nume) AND UPPER(prenume) = UPPER(f_prenume);
+        SELECT COUNT(*) INTO nr FROM comenzi WHERE id_client = v_id_client AND data_primire = f_data;
+        IF nr = 0 THEN
+            RAISE zero_orders_exc;
+        END IF;
+        SELECT pc.cantitate * p.pret BULK COLLECT INTO price_table FROM produse_comanda pc
+        JOIN comenzi c
+        ON c.id_comanda = pc.id_comanda
+        JOIN produse p
+        ON p.id_produs = pc.id_produs
+        WHERE c.id_client = v_id_client AND c.data_primire = f_data;
+        FOR i IN price_table.FIRST..price_table.LAST LOOP
+            pret_total := pret_total + price_table(i);
+        END LOOP;
+        RETURN NVL(pret_total, 0);
+        EXCEPTION
+            WHEN zero_clients_exc THEN
+                RAISE_APPLICATION_ERROR(-20001, 'Nu exista nici un client cu numele dat');
+            WHEN multiple_clients_exc THEN
+                RAISE_APPLICATION_ERROR(-20002, 'Exista mai multi clienti cu numele dat');
+            WHEN zero_orders_exc THEN
+                RAISE_APPLICATION_ERROR(-20003, 'Nu exista nici o comanda data de acest client la data respectiva');
+            WHEN value_error THEN
+                RAISE_APPLICATION_ERROR(-20004, 'Nu exista nici un produs in comanda data');
+    END ex_8;
+    
+    PROCEDURE ex_9
+    IS
+        v_id_produs produse.id_produs%TYPE;
+        v_nr_ingrediente NUMBER(3);
+        v_check BOOLEAN := false;
+        v_nume_produs produse.nume%TYPE;
+        CURSOR v_cursor(c_id_produs produse.id_produs%TYPE)
+        IS
+            SELECT clienti.nume clienti_nume, clienti.prenume clienti_prenume, angajati.nume angajati_nume, angajati.prenume angajati_prenume, nr_inmatriculare, data_primire
+            FROM produse_comanda
+            JOIN comenzi ON comenzi.id_comanda = produse_comanda.id_comanda
+            JOIN clienti ON clienti.id_client = comenzi.id_client
+            JOIN angajati ON angajati.id_angajat = produse_comanda.id_angajat
+            JOIN masini_livrare ON masini_livrare.serie_sasiu = angajati.serie_sasiu
+            WHERE produse_comanda.id_produs = c_id_produs;
+    BEGIN
+        SELECT MAX(COUNT(*)) INTO v_nr_ingrediente FROM contine GROUP BY id_produs;
+        SELECT id_produs INTO v_id_produs FROM (SELECT id_produs, COUNT(*) as nr FROM contine GROUP BY id_produs) c WHERE nr = v_nr_ingrediente;
+        SELECT nume INTO v_nume_produs FROM produse WHERE id_produs = v_id_produs;
+        FOR i IN v_cursor(v_id_produs) LOOP
+            v_check := true;
+            DBMS_OUTPUT.PUT_LINE('Clientul ' || i.clienti_nume || ' ' || i.clienti_prenume || ' a comandat produsul ' || v_nume_produs || ' pe ' || TO_CHAR(i.data_primire, 'YYYY-MM-DD HH24:MI:SS') || ' si a fost livrata de ' || i.angajati_nume || ' ' || i.angajati_prenume || ' cu masina ' || i.nr_inmatriculare);
+        END LOOP;
+        IF v_check = false THEN
+            DBMS_OUTPUT.PUT_LINE('Nu a comandat inca nimeni produsul ' || v_nume_produs);
+        END IF;
+        EXCEPTION
+            WHEN too_many_rows THEN
+                RAISE_APPLICATION_ERROR(-20060, 'Exista mai multe produse ce au numar maxim de ingrediente');
+            WHEN no_data_found THEN
+                RAISE_APPLICATION_ERROR(-20061, 'Nu exista nici un produs');
+            WHEN others THEN
+                RAISE_APPLICATION_ERROR(-20062, 'A aparut alta eroare');
+    END ex_9;
+END pachet_ex_13;
+
+
+DECLARE
+    v_nume clienti.nume%TYPE := 'Maru';
+    v_prenume clienti.prenume%TYPE :='Andrei';
+    v_data comenzi.data_primire%TYPE := '09-FEB-22 07.00.00.000000000 AM';
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Exercitiul 6:');
+    pachet_ex_13.ex_6;
+    DBMS_OUTPUT.NEW_LINE;
+    DBMS_OUTPUT.PUT_LINE('Exercitiul 7:');
+    pachet_ex_13.ex_7(v_nume, v_prenume);
+    DBMS_OUTPUT.NEW_LINE;
+    DBMS_OUTPUT.PUT_LINE('Exercitiul 8:');
+    DBMS_OUTPUT.PUT_LINE('Valoarea comenzii este de ' || pachet_ex_13.ex_8(v_nume, v_prenume, v_data) || 'RON');
+    DBMS_OUTPUT.NEW_LINE;
+    DBMS_OUTPUT.PUT_LINE('Exercitiul 9:');
+    pachet_ex_13.ex_9;
+END;
