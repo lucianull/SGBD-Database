@@ -54,6 +54,7 @@ CREATE TABLE produse_receptie
     (id_ingredient NUMBER(8),
     id_receptie NUMBER(8),
     cantitate FLOAT,
+    pret_buc NUMBER(8, 2),
     CONSTRAINT produse_receptie_id_ingredient_fk FOREIGN KEY (id_ingredient) REFERENCES ingrediente(id_ingredient),
     CONSTRAINT produse_receptie_id_receptie_fk FOREIGN KEY (id_receptie) REFERENCES receptii(id_receptie));
     
@@ -229,14 +230,14 @@ INSERT INTO receptii VALUES(SEQ_RECEPTII.NEXTVAL, 3, TO_TIMESTAMP('2022-04-14 11
 
 select * from receptii;
 
-INSERT INTO produse_receptie VALUES(1, 1, 240);
-INSERT INTO produse_receptie VALUES(2, 1, 3.5);
-INSERT INTO produse_receptie VALUES(5, 3, 4.5);
-INSERT INTO produse_receptie VALUES(3, 2, 3.5);
-INSERT INTO produse_receptie VALUES(4, 4, 5.5);
-INSERT INTO produse_receptie VALUES(2, 2, 1.5);
-INSERT INTO produse_receptie VALUES(1, 3, 120);
-INSERT INTO produse_receptie VALUES(3, 3, 5.5);
+INSERT INTO produse_receptie VALUES(1, 1, 240, 0.8);
+INSERT INTO produse_receptie VALUES(2, 1, 3.5, 80);
+INSERT INTO produse_receptie VALUES(5, 3, 4.5, 15);
+INSERT INTO produse_receptie VALUES(3, 2, 3.5, 25);
+INSERT INTO produse_receptie VALUES(4, 4, 5.5, 30);
+INSERT INTO produse_receptie VALUES(2, 2, 1.5, 85);
+INSERT INTO produse_receptie VALUES(1, 3, 120, 0.85);
+INSERT INTO produse_receptie VALUES(3, 3, 5.5, 24);
 
 select * from produse_receptie;
 
@@ -830,4 +831,313 @@ BEGIN
     DBMS_OUTPUT.NEW_LINE;
     DBMS_OUTPUT.PUT_LINE('Exercitiul 9:');
     pachet_ex_13.ex_9;
+END;
+
+
+-- 14
+CREATE OR REPLACE PACKAGE pachet_ex_14 AS
+    TYPE best_year_structure IS RECORD 
+        (g_year VARCHAR2(4),
+        g_revenue NUMBER(8, 2));
+    TYPE ingredients_providers_structure IS RECORD
+        (g_id_ingredient ingrediente.id_ingredient%TYPE,
+        g_nume ingrediente.nume%TYPE,
+        g_cantitate NUMBER(8, 2),
+        g_cost NUMBER(8, 2));
+    TYPE ingredients_providers_vector IS TABLE OF ingredients_providers_structure;
+    PROCEDURE top_clients
+        (l_n NUMBER,
+        l_an VARCHAR2);
+    PROCEDURE top_products
+        (l_n NUMBER,
+        l_an VARCHAR2);
+    FUNCTION get_income
+        (l_an VARCHAR2)
+    RETURN NUMBER;
+    PROCEDURE top_providers
+        (l_n NUMBER,
+        l_an VARCHAR2);
+    FUNCTION best_year RETURN best_year_structure;
+    FUNCTION ingredients_providers
+        (l_an VARCHAR2)
+    RETURN ingredients_providers_vector;
+END pachet_ex_14;
+
+
+CREATE OR REPLACE PACKAGE BODY pachet_ex_14 AS
+--  Afișarea a top N clienți care au comandat cel mai mult dintr-un an (N și anul sunt dați ca parametri)
+    PROCEDURE top_clients
+        (l_n NUMBER,
+        l_an VARCHAR2)
+    IS
+        TYPE record_clienti IS RECORD
+            (nume clienti.nume%TYPE,
+            prenume clienti.prenume%TYPE,
+            numar_comenzi NUMBER(8));
+        TYPE vector_clienti IS TABLE OF record_clienti;
+        top_clienti vector_clienti;
+        nr NUMBER(8);
+        not_enough EXCEPTION;
+    BEGIN
+    
+        SELECT COUNT(*) INTO nr FROM 
+            (SELECT DISTINCT(nr) FROM 
+                (SELECT COUNT(*) nr 
+                FROM comenzi 
+                WHERE TO_CHAR(data_primire, 'YYYY') = l_an AND id_client IS NOT NULL 
+                GROUP BY id_client 
+                ORDER BY nr DESC) 
+            WHERE ROWNUM <= l_n);
+        
+        IF nr != l_n THEN
+            RAISE not_enough;
+        END IF;
+        
+        SELECT * 
+        BULK COLLECT INTO top_clienti 
+        FROM 
+            (SELECT clienti.nume, clienti.prenume, c.nr
+            FROM clienti
+            JOIN
+                (SELECT id_client, COUNT(*) nr 
+                FROM comenzi 
+                WHERE TO_CHAR(data_primire, 'YYYY') = l_an AND id_client IS NOT NULL 
+                GROUP BY id_client) c
+            ON c.id_client = clienti.id_client)
+        WHERE nr IN 
+                    (SELECT DISTINCT(nr) FROM 
+                        (SELECT COUNT(*) nr 
+                        FROM comenzi 
+                        WHERE TO_CHAR(data_primire, 'YYYY') = l_an AND id_client IS NOT NULL 
+                        GROUP BY id_client 
+                        ORDER BY nr DESC) 
+                    WHERE ROWNUM <= l_n);
+        
+        FOR i IN top_clienti.FIRST..top_clienti.LAST LOOP
+            DBMS_OUTPUT.PUT_LINE(top_clienti(i).nume || ' ' || top_clienti(i).prenume || ' ' || top_clienti(i).numar_comenzi);
+        END LOOP;
+    EXCEPTION
+        WHEN not_enough OR no_data_found THEN
+            RAISE_APPLICATION_ERROR(-20101, 'Nu sunt destui oameni care au dat un numar diferit de comenzi pentru a forma un top-' || l_n || ', top-ul maxim este de ' || nr);
+    END top_clients;
+    
+--Afișarea a top N produse comandate cel mai mult dintr-un an (N este dat ca parametru)
+    PROCEDURE top_products
+        (l_n NUMBER,
+        l_an VARCHAR2)
+    IS
+        TYPE record_produse IS RECORD
+            (nume produse.nume%TYPE,
+            cantitate_totala_comandata NUMBER(8));
+        TYPE vector_produse IS TABLE OF record_produse;
+        top_produse vector_produse;
+        nr NUMBER(8);
+        not_enough EXCEPTION;
+    BEGIN
+        SELECT COUNT(*) INTO nr FROM
+        (SELECT quantity 
+        FROM
+            (SELECT DISTINCT(SUM(cantitate)) quantity
+            FROM
+                (SELECT produse_comanda.id_produs, cantitate
+                FROM produse_comanda
+                LEFT JOIN comenzi
+                ON comenzi.id_comanda = produse_comanda.id_comanda
+                WHERE TO_CHAR(data_primire, 'YYYY') = l_an)
+            GROUP BY id_produs
+            ORDER BY quantity DESC)
+        WHERE ROWNUM <= l_n);
+        
+        IF nr != l_n THEN
+            RAISE not_enough;
+        END IF;
+        
+        SELECT * BULK COLLECT INTO top_produse 
+        FROM
+            (SELECT MAX(produse.nume), SUM(c.cantitate) nr_comenzi
+            FROM
+                (SELECT cantitate, produse_comanda.id_produs
+                FROM produse_comanda
+                LEFT JOIN comenzi
+                ON produse_comanda.id_comanda = comenzi.id_comanda
+                WHERE TO_CHAR(comenzi.data_primire, 'YYYY') = l_an) c
+            JOIN produse
+            ON produse.id_produs = c.id_produs
+            GROUP BY produse.id_produs
+            ORDER BY nr_comenzi DESC)
+        WHERE nr_comenzi IN
+            (SELECT quantity 
+            FROM
+                (SELECT DISTINCT(SUM(cantitate)) quantity
+                FROM
+                    (SELECT produse_comanda.id_produs, cantitate
+                    FROM produse_comanda
+                    LEFT JOIN comenzi
+                    ON comenzi.id_comanda = produse_comanda.id_comanda
+                    WHERE TO_CHAR(data_primire, 'YYYY') = l_an)
+                GROUP BY id_produs
+                ORDER BY quantity DESC)
+            WHERE ROWNUM <= l_n);
+        
+        FOR i IN top_produse.FIRST..top_produse.LAST LOOP
+            DBMS_OUTPUT.PUT_LINE(top_produse(i).nume || ' ' || top_produse(i).cantitate_totala_comandata);
+        END LOOP;
+        
+    EXCEPTION
+        WHEN no_data_found OR not_enough THEN
+            RAISE_APPLICATION_ERROR(-20102, 'Nu sunt destule produse care au un numar cantitati totale comandate diferite pentru a forma un top-' || l_n || ', top-ul maxim este de ' || nr);
+    END top_products;
+    
+--O funcție care returnează încasările dintr-un an (anul este dat ca parametru)
+    FUNCTION get_income
+        (l_an VARCHAR2)
+    RETURN NUMBER
+    IS
+        incasari NUMBER(8, 2);
+    BEGIN
+        SELECT SUM(valoare) INTO incasari FROM mod_plata
+        JOIN comenzi ON comenzi.id_comanda = mod_plata.id_comanda
+        WHERE TO_CHAR(data_primire, 'YYYY') = l_an;
+        IF incasari IS NULL THEN
+            RAISE no_data_found;
+        END IF;
+        RETURN incasari;
+    EXCEPTION
+        WHEN no_data_found THEN
+            RAISE_APPLICATION_ERROR(-20105, 'Nu exista comenzi in anul ' || l_an);
+    END get_income;
+    
+--Afișarea a top N furnizori de la care restaurantul s-a aprovizionat cel mai des intr-un an (N este dat ca parametru)
+    PROCEDURE top_providers
+        (l_n NUMBER,
+        l_an VARCHAR2)
+    IS
+        TYPE furnizori_record IS RECORD
+            (nume furnizori.nume%TYPE,
+            nr_receptii NUMBER(8));
+        TYPE furnizori_vector IS TABLE OF furnizori_record;
+        top_furnizori furnizori_vector;
+        not_enough EXCEPTION;
+        nr NUMBER(8);
+    BEGIN
+        SELECT COUNT(*) INTO nr 
+        FROM
+            (SELECT * FROM
+                (SELECT DISTINCT(nr_receptii)
+                FROM
+                    (SELECT COUNT(*) nr_receptii FROM receptii
+                    WHERE TO_CHAR(data_primire, 'YYYY') = l_an
+                    GROUP BY id_furnizor
+                    ORDER BY nr_receptii DESC))
+            WHERE ROWNUM <= l_n);
+            
+        IF nr!= l_n THEN
+            RAISE not_enough;
+        END IF;
+        
+        SELECT nume, nr_receptii BULK COLLECT INTO top_furnizori
+        FROM
+            (SELECT COUNT(*) nr_receptii, id_furnizor FROM receptii
+            WHERE TO_CHAR(data_primire, 'YYYY') = l_an
+            GROUP BY id_furnizor) c
+        LEFT JOIN furnizori ON furnizori.id_furnizor = c.id_furnizor
+        WHERE nr_receptii IN
+            (SELECT * FROM
+                (SELECT DISTINCT(nr_receptii)
+                FROM
+                    (SELECT COUNT(*) nr_receptii FROM receptii
+                    WHERE TO_CHAR(data_primire, 'YYYY') = l_an
+                    GROUP BY id_furnizor
+                    ORDER BY nr_receptii DESC))
+            WHERE ROWNUM <= l_n)
+        ORDER BY nr_receptii DESC;
+        
+        FOR i IN top_furnizori.FIRST..top_furnizori.LAST LOOP
+            DBMS_OUTPUT.PUT_LINE(top_furnizori(i).nume || ' ' || top_furnizori(i).nr_receptii);
+        END LOOP;
+        
+    EXCEPTION
+        WHEN not_enough OR no_data_found THEN
+            RAISE_APPLICATION_ERROR(-20103, 'Nu exista suficienti furnizori care sa fi trimis un numar total de receptii diferit pentru a forma un top-' || l_n || ' top-ul maxim este de ' || nr);
+    END top_providers;
+
+--O funcție care returnează anul cu cele mai mari încasări și veniturile din acel an
+    FUNCTION best_year 
+    RETURN best_year_structure
+    IS
+        ret_value best_year_structure;
+        TYPE vector_ani IS TABLE OF VARCHAR2(4) INDEX BY PLS_INTEGER;
+        ani vector_ani;
+        nr NUMBER(8, 2);
+        no_orders EXCEPTION;
+    BEGIN
+        SELECT DISTINCT(TO_CHAR(data_primire, 'YYYY')) BULK COLLECT INTO ani FROM comenzi;
+        IF ani.COUNT < 1 THEN
+            RAISE no_orders;
+        END IF;
+        ret_value.g_revenue := 0;
+        FOR i IN ani.FIRST..ani.LAST LOOP
+            nr := get_income(ani(i));
+            IF nr > ret_value.g_revenue THEN
+                ret_value.g_revenue := nr;
+                ret_value.g_year := ani(i);
+            END IF;
+        END LOOP;
+        RETURN ret_value;
+    EXCEPTION
+        WHEN no_orders THEN
+            RAISE_APPLICATION_ERROR(-20104, 'Restaurantul nu are inca nici o comanda');
+    END best_year;
+
+--O funcție care returnează o lista cu cantitatea primită de la furnizori pentru fiecare ingredient și costurile asociate într-un an (anul este dat ca parametru)
+    FUNCTION ingredients_providers
+        (l_an VARCHAR2)
+    RETURN ingredients_providers_vector
+    IS
+        vec_ingrediente ingredients_providers_vector;
+        no_receptions EXCEPTION;
+    BEGIN
+        SELECT c.id_ingredient, ingrediente.nume, c.quantity, c.price BULK COLLECT INTO vec_ingrediente FROM
+            (SELECT produse_receptie.id_ingredient, SUM(produse_receptie.pret_buc * produse_receptie.cantitate) price, SUM (produse_receptie.cantitate) quantity
+            FROM produse_receptie
+            JOIN receptii 
+            ON receptii.id_receptie = produse_receptie.id_receptie
+            WHERE TO_CHAR(receptii.data_primire, 'YYYY') = l_an
+            GROUP BY id_ingredient) c
+        LEFT JOIN ingrediente
+        ON c.id_ingredient = ingrediente.id_ingredient;
+        IF vec_ingrediente.COUNT  < 1 THEN
+            RAISE no_receptions;
+        END IF;
+        RETURN vec_ingrediente;
+    EXCEPTION
+        WHEN no_receptions THEN
+            RAISE_APPLICATION_ERROR(-20106, 'Restaurantul nu a primit nici o receptie in anul ' || l_an);
+    END ingredients_providers;
+
+END pachet_ex_14;
+
+DECLARE
+    v_value pachet_ex_14.best_year_structure;
+    v_ingrediente pachet_ex_14.ingredients_providers_vector;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('Top clienti in anul 2022:');
+    pachet_ex_14.top_clients(2, '2022');
+    DBMS_OUTPUT.NEW_LINE;
+    DBMS_OUTPUT.PUT_LINE('Top produse vandute in anul 2022:');
+    pachet_ex_14.top_products(5, '2022');
+    DBMS_OUTPUT.NEW_LINE;
+    DBMS_OUTPUT.PUT_LINE('Total incasari pe anul 2022: ' || pachet_ex_14.get_income('2022'));
+    DBMS_OUTPUT.NEW_LINE;
+    DBMS_OUTPUT.PUT_LINE('Top furnizori pe anul 2022:');
+    pachet_ex_14.top_providers(2, '2022');
+    DBMS_OUTPUT.NEW_LINE;
+    v_value := pachet_ex_14.best_year;
+    DBMS_OUTPUT.PUT_LINE('Anul cu cele mai bune incasari a fost ' || v_value.g_year || ' cu venituri in valoare de ' || v_value.g_revenue);
+    DBMS_OUTPUT.NEW_LINE;
+    DBMS_OUTPUT.PUT_LINE('Totalul cantitatii si al costului dat pe fiecare ingredient in anul 2022:');
+    v_ingrediente := pachet_ex_14.ingredients_providers('2022');
+    FOR i IN v_ingrediente.FIRST..v_ingrediente.LAST LOOP
+        DBMS_OUTPUT.PUT_LINE(v_ingrediente(i).g_nume || ' cu cantitatea de ' || v_ingrediente(i).g_cantitate || ' la pretul de ' || v_ingrediente(i).g_cost);
+    END LOOP;
 END;
