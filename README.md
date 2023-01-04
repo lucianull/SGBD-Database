@@ -8,4 +8,4 @@ This project was made as a exam for SGBD course. The project includes a full doc
 
 ### Software used:
 - Oracle SQL Developer
-- Oracle XE
+- Oracle XE 21c
